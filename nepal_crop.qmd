@@ -1,0 +1,110 @@
+---
+title: "nepal_crop"
+format: html
+---
+
+```{r}
+library(tidyverse)
+library(janitor)
+library(dplyr)
+library(tmap)
+library(sf)
+library(here)
+library(stars)
+library(spData)
+library(terra)
+```
+
+Load dataframes 
+```{r}
+# Dams
+current_dams <- read_sf(here::here('data', 'GRanD_Version_1_3')) %>% 
+  clean_names()
+
+future_dams <- read_csv(here::here('data', 'FHReD_2015_future_dams', 'FHRed_2015_future_dams_CSV.csv')) %>% 
+  clean_names()
+
+# Population
+global_pop_sf <- read_stars(here::here('data', 'global_pop_2020_CN_1km_R2025A_UA_v1.tif')) %>% 
+  clean_names()
+
+global_pop_rast <- rast(here::here('data', 'global_pop_2020_CN_1km_R2025A_UA_v1.tif')) %>% 
+  clean_names()
+
+# Water Basin
+basin_level3 <- read_sf(here::here('data', 'asia_basin_levels', 'hybas_as_lev03_v1c.shp')) %>% 
+  clean_names()
+
+# Rivers
+asia_rivers <- read_sf(here::here('data', 'asia_HydroRIVERS.gdb', 'HydroRIVERS_v10_as.gdb')) %>% 
+  clean_names()
+
+```
+
+Making `future_dams` spatial  
+```{r}
+future_dams <- st_as_sf(future_dams,
+         coords = c('lon_cleaned', 'lat_cleaned'), 
+         crs = st_crs(current_dams))
+```
+
+Nepal Basin 
+```{r}
+nepal_basin <- basin_level3 %>% 
+  filter(hybas_id == 4030025450)
+```
+
+Filtering Rivers to order 2 or 3 
+```{r}
+asia_rivers2 <- asia_rivers %>% 
+  filter(ord_clas == 2)
+
+asia_rivers3 <- asia_rivers %>% 
+  filter(ord_clas == 3)
+
+# Look at difference between river order 2 vs 3 
+tm_shape(asia_rivers2) + 
+  tm_lines()
+
+tm_shape(asia_rivers3) + 
+  tm_lines()
+```
+
+
+Making geometeries valid 
+```{r}
+current_dams <- st_make_valid(current_dams)
+future_dams <- st_make_valid(future_dams)
+nepal_basin <- st_make_valid(nepal_basin)
+asia_rivers2 <- st_make_valid(asia_rivers2)
+asia_rivers3 <- st_make_valid(asia_rivers3)
+```
+
+Crop dams and rivers to Nepal basin 
+```{r}
+nepal_current_dams <- st_intersection(nepal_basin, current_dams)
+nepal_future_dams <- st_intersection(nepal_basin, future_dams)
+#nepal_rivers3 <- st_intersection(nepal_basin, asia_rivers3)
+#nepal_rivers2 <- st_intersection(nepal_basin, asia_rivers2)
+```
+
+Map! 
+```{r}
+tm_shape(nepal_basin) + 
+  tm_polygons(fill_alpha = 0.4, lwd = 2.5) + 
+  tm_basemap('Esri.WorldTopoMap') + 
+  tm_shape(nepal_current_dams) + 
+  tm_dots(fill = "red") + 
+  tm_shape(nepal_future_dams) + 
+  tm_dots(fill = "blue") + 
+  #tm_shape(nepal_rivers2) + 
+  #tm_lines() + 
+  tm_add_legend(type = "polygons", 
+                labels = c("Current Dams", "Future Dams"), 
+                fill = c("red", "blue"), 
+                title = "Dam Status") + 
+  tm_title(text = "Dams in Nepal") + 
+  tm_compass() + 
+  tm_scalebar()
+
+```
