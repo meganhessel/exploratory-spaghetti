@@ -1,0 +1,69 @@
+---
+title: "population_counts"
+format: pdf
+---
+
+load libraries
+```{r}
+#| message: false
+library(tidyverse)
+library(terra)
+
+```
+
+load data and check crs
+```{r}
+# read in population data
+pop <- rast('../../../../capstone/netzerohydro/data/raw/global_pop_2020_CN_1km_R2025A_UA_v1.tif')
+
+crs(pop) # no crs, we will assign 4326
+pop <- project(pop, "epsg:4326")
+crs(pop) # looks good
+
+# read in river data
+nepal_rivers_3up <- readRDS("../../../../../capstone/netzerohydro/data/cleaned_v1/nepal_rivers_3up.rds")
+nepal_rivers_vect <- vect(nepal_rivers_3up)
+
+# read in future dams and make terra object
+nepal_future_dams <- readRDS("../../../../../capstone/netzerohydro/data/cleaned_v1/nepal_future_dams.rds") 
+nepal_future_dams_vect <- vect(nepal_future_dams)
+crs(nepal_future_dams_vect)
+```
+
+crop population to nepal
+```{r}
+pop_nepal <- crop(pop, nepal_rivers_vect)
+
+# # remove 0s, I don't think there were any
+# pop_nepal_nozero <- subst(pop_nepal, 0, NA)
+# # filter for populations less than 100
+# pop_nepal_nozero[pop_nepal_nozero < 100 ] <- NA
+```
+
+quick plot
+```{r}
+plot(pop_nepal)
+plot(nepal_future_dams_vect, add = TRUE, col = "orange", alpha = 0.5)
+```
+
+create buffer around dams
+```{r}
+# create buffer around future dams
+nepal_future_buffer <- buffer(nepal_future_dams_vect, width = 1000) # 1000 meters
+plot(nepal_future_buffer)
+```
+
+find population counts for future dam buffers
+```{r}
+# find pop values within the buffer
+pop_nepal_values <- extract(pop_nepal, nepal_future_buffer, fun = sum, na.rm = TRUE) %>% 
+  rename(total_pop = global_pop_2020_CN_1km_R2025A_UA_v1,
+         future_dam = ID)
+
+head(pop_nepal_values)
+```
+
+To check:
+
+  - Is population values total counts of population, or in 1000s?
+  - Can I make the future dam number dam_id?

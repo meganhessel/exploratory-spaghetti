@@ -1,6 +1,8 @@
 ---
-title: "connectivity_matrix"
+title: "determine_upstream_downstream"
 format: html
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r}
@@ -20,10 +22,11 @@ library(renv)
 library(sfnetworks)
 ```
 
+Load data
 ```{r}
 nepal_rivers <- readRDS("../../../../../capstone/netzerohydro/data/cleaned_v1/nepal_rivers_3up.rds") 
 nepal_current_dams <- readRDS("../../../../../capstone/netzerohydro/data/cleaned_v1/nepal_current_dams.rds") 
-
+nepal_future_dams <- readRDS("../../../../../capstone/netzerohydro/data/cleaned_v1/nepal_future_dams.rds") 
 ```
 
 Change `nepal_rivers` to 'LINESTRING'
@@ -31,6 +34,7 @@ Change `nepal_rivers` to 'LINESTRING'
 # Change MULTISTRINGS TO LINESTRING (for sfnetwork)
 nepal_rivers <- st_cast(nepal_rivers , "LINESTRING")
 
+plot(nepal_rivers)
 ```
 
 ## Convert Nepal River network to sfnetwork
@@ -39,9 +43,6 @@ nepal_rivers <- st_cast(nepal_rivers , "LINESTRING")
 net <- as_sfnetwork(nepal_rivers, direction = TRUE) %>% # convert river geom into spatial network
   tidygraph::activate("edges") %>%  # "Next operation applied to edges table (not node table)"
   mutate(weight = edge_length()) # calculate spatial length of each edge (river segment)
-         
-
-net_df <- as_tibble(net) # makes sfnetwork a df 
 
 # Look at net  
 plot(net, col = "blue", main = "Base R Plot of net from nepal_rivers")
@@ -61,25 +62,38 @@ Checking CRS and geometry names
 ```{r}
 # Check CRS 
 #st_crs(nepal_current_dams) # EPSG",4326
+#st_crs(nepal_future_dams) # EPSG",4326
 #st_crs(nepal_rivers) # "EPSG",4326 
 #st_crs(net) # WGS 84 / EPSG",4326
 
 st_crs(nepal_current_dams) == st_crs(nepal_rivers) # TRUE 
 st_crs(nepal_current_dams) == st_crs(net) # TRUE 
+st_crs(nepal_future_dams) == st_crs(nepal_rivers) # TRUE 
+st_crs(nepal_future_dams) == st_crs(net) # TRUE 
 
 # Change shape geometry to `geometry` 
 nepal_rivers <- st_set_geometry(nepal_rivers, "geometry") 
 
-```
-
-```{r}
 # `nepal_current_dams` is polygons. Need to be points 
 nepal_current_dams <- st_point_on_surface(nepal_current_dams)
 
 # before blending, mark which nodes are dams 
 nepal_current_dams <- nepal_current_dams %>% 
-  mutate(is_dam = TRUE)
+  mutate(is_dam = TRUE,
+         type = "current")
 
+nepal_future_dams <- nepal_future_dams %>% 
+  mutate(is_dam = TRUE,
+         type = "future")
+
+# join dam datasets together
+join1 <- nepal_current_dams %>% st_join(nepal_future_dams, suffix = c("", ".y"))
+join2 <- nepal_future_dams %>% st_join(nepal_current_dams, suffix = c("", ".y"))
+nepal_dams_all <- join1 %>% 
+  bind_rows(join2) %>% 
+  select(-c("is_dam.y", "type.y", "x16", "x17", "x18", "x19", "x20"))
+
+colnames(nepal_dams_all)
 ```
 
 # Snapping dams and creating nodes
@@ -89,24 +103,19 @@ nepal_current_dams <- nepal_current_dams %>%
 -   Blends a point into a network: process of (1) snapping given point in nearest edge in network (2) splitting edge at location (3) adding snapped point as node to network
 
 -   If location of snapped point is already a node, the attributes of point will be joined to the pre-existing node
-
 ```{r}
 # snapping and creating nodes of dams 
 net_with_dams <- net %>% 
-  st_network_blend(nepal_current_dams, tolerance = 1000)
+  st_network_blend(nepal_dams_all, tolerance = 1000)
 
-net_with_dams_df <- as_tibble(net_with_dams) # makes sfnetwork a df 
+net_with_dams_df <- as_tibble(net_with_dams) # makes sfnetwork a df
 
-
-
-# Plotting every line edge and juntion from net_with_dams
+# Plotting every line edge and junction from net_with_dams
 ggplot() +
   geom_sf(data = st_as_sf(net_with_dams, "nodes"), color = "red", size = 0.3) +
   geom_sf(data = st_as_sf(net_with_dams, "edges"), color = "gray40", size = 0.3) +
   theme_minimal() +
   labs(title = "net_with_dams with ggplot2")
-
-
 ```
 
 ### Look at snapped dams that are now nodes
@@ -120,8 +129,7 @@ dam_nodes_sf <- net_with_dams %>%
   filter(is_dam == TRUE) %>% 
   st_as_sf()
 
-# Snapped 74 dam nodes (of the 80 `nepal_current_dams` obs) - thats good! 
-
+# Snapped 412 dam nodes (of the 497 `nepal_dams_all` obs) - thats good! 
 
 # Pulling `hybas_id` dams that snapped to the river network 
 grand_id_snapped_dams <- net_with_dams %>% 
@@ -136,7 +144,7 @@ ggplot() +
   geom_sf(data = st_as_sf(net_with_dams, "edges"), color = "gray40", size = 0.2) +
   geom_sf(data = st_as_sf(dam_nodes_sf, "nodes"), color = "red", size = 0.5) +
   theme_minimal() +
-  labs(title = "current dams that became nodes with ggplot2")
+  labs(title = "current and futuredams that became nodes with ggplot2")
 
 ```
 
@@ -144,7 +152,7 @@ ggplot() +
 
 ```{r}
 # all dams 
-length(nepal_current_dams$grand_id)
+length(nepal_dams_all$grand_id)
 
 # Dams that were snapped 
 length(grand_id_snapped_dams)
@@ -178,7 +186,6 @@ connectivity_matrix
 ```
 
 ```{r}
-
 # Get hybas_id for each dam node directly from network
 dam_grand_ids <- net_with_dams %>%
   tidygraph::activate("nodes") %>%
@@ -236,8 +243,5 @@ ggplot(reach_df, aes(x = distance_m / 1000)) +
   ) +
   # Use minimal theme (clean, simple appearance)
   theme_minimal()
-
-
 ```
-
 

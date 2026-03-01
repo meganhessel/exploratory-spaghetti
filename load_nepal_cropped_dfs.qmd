@@ -21,19 +21,34 @@ library(readxl)
 Download data 
 ```{r}
 # Dams
-current_dams <- read_sf("../../../../../capstone/netzerohydro/data/GRanD_Version_1_3") %>% 
+current_dams <- read_sf("../../../../../capstone/netzerohydro/data/raw/GRanD_Version_1_3") %>% 
+<<<<<<< HEAD
   clean_names()
 
-future_dams <- read_csv("../../../../../capstone/netzerohydro/data/FHReD_2015_future_dams/FHReD_2015_future_dams_Zarfl_et_al_beta_version.csv") %>% 
+future_dams <- read_csv("../../../../../capstone/netzerohydro/data/raw/FHReD_2015_future_dams/FHReD_2015_future_dams_Zarfl_et_al_beta_version.csv") %>% 
   clean_names()
 
 # Water Basin
-basin_level3 <- read_sf("../../../../../capstone/netzerohydro/data/hybas_as_lev01-12_v1c/hybas_as_lev03_v1c.shp") %>% 
+basin_level3 <- read_sf("../../../../../capstone/netzerohydro/data/raw/hybas_as_lev01-12_v1c/hybas_as_lev03_v1c.shp") %>% 
   clean_names()
 
 # Rivers
-asia_rivers <- read_sf("../../../../../capstone/netzerohydro/data/HydroRIVERS_v10_as.gdb") %>% 
+asia_rivers <- read_sf("../../../../../capstone/netzerohydro/data/raw/HydroRIVERS_v10_as.gdb") %>% 
   clean_names()
+=======
+  janitor::clean_names()
+
+future_dams <- read_csv("../../../../../capstone/netzerohydro/data/raw/FHReD_2015_future_dams/FHReD_2015_future_dams_Zarfl_et_al_beta_version.csv") %>% 
+  janitor::clean_names()
+
+# Water Basin
+basin_level3 <- read_sf("../../../../../capstone/netzerohydro/data/raw/hybas_as_lev01-12_v1c/hybas_as_lev03_v1c.shp") %>% 
+  janitor::clean_names()
+
+# Rivers
+asia_rivers <- read_sf("../../../../../capstone/netzerohydro/data/raw/HydroRIVERS_v10_as.gdb") %>% 
+  janitor::clean_names()
+>>>>>>> 6980e7a22edccb6a5ad878b9b3c19ab0e25086b6
 ```
 
 # Clean data & Crop to Nepal 
@@ -81,6 +96,11 @@ trial_future_dams <- st_intersection(box_poly, nepal_future_dams)
 trial_river <- nepal_rivers_3up %>%
   st_filter(y = box_poly, .predicate = st_intersects)
 
+```
+
+```{r}
+head(nepal_current_dams)
+head(current_dams)
 ```
 
 

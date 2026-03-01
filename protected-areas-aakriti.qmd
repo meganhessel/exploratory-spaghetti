@@ -1,0 +1,278 @@
+---
+title: "Exploring protected areas and dam locations in Nepal"
+author: "Aakriti Poudel"
+date: "February 2026"
+format:
+  pdf:
+    code-fold: false
+    toc: true
+  html: 
+    code-fold: false
+    toc: true
+execute:
+  warning: false
+  message: false
+editor: source
+editor_options: 
+  chunk_output_type: inline
+---
+
+## Overview
+
+This document explores the spatial relationship between protected areas, current dams and proposed future dams within Nepal's river basin. The goal is to visually identify where future dams development might overlap with socially and ecologically sensitive areas.
+
+```{r}
+#| echo: false
+#| output: false
+
+# Check the current working directory
+getwd()
+
+```
+
+## Set up
+
+Load all necessary packages
+
+```{r}
+#| label: load-packages
+#| output: false
+
+# Data cleaning and wrangling
+library(tidyverse)
+library(janitor)
+library(here)
+
+# Spatial data handling
+library(sf)
+
+# Interactive and static mapping
+library(tmap)
+library(leaflet)
+
+```
+
+### Check the protected areas geodatabase
+
+The WDPA geodatabase contains three layers: polygons, points and source metadata. We need the polygon layer for our spatial analysis.
+
+```{r}
+#| label: check-layers
+
+# Check what layers are inside the data set
+st_layers("../../../../../capstone/netzerohydro/data/raw/WDPA_WDOECM_Jan2026_Public/world_database_protected_areas.gdb")
+
+```
+
+## Read all datasets
+
+```{r}
+#| label: read-data
+#| output: false
+
+# Read the polygon layer for protected areas
+protected_areas_polygon <- st_read(
+  "../../../../../capstone/netzerohydro/data/raw/WDPA_WDOECM_Jan2026_Public/world_database_protected_areas.gdb",
+  layer = "WDPA_WDOECM_poly_Jan2026_e05cdb98a28bc5c1f76cc4919558750e5cb5dfe8ebdf74a197e38cf76ee489b7") %>%
+  clean_names()
+
+# Read the current dams dataset
+current_dams <- st_read("../../../../../capstone/netzerohydro/data/raw/GRanD_Version_1_3") %>% clean_names()
+
+# Read the current dams dataset
+future_dams <- read_csv("../../../../../capstone/netzerohydro/data/raw/FHReD_2015_future_dams/FHReD_2015_future_dams_Zarfl_et_al_beta_version.csv") %>%
+  clean_names()
+
+# Read watershed boundaries at basin level 3
+basin_level3 <- st_read("../../../../../capstone/netzerohydro/data/raw/hybas_as_lev03_v1c") %>% clean_names()
+
+```
+
+## Explore all datasets
+
+### Convert future dams to a spatial object
+
+The FHReD dataset is a CSV file, so it does not have any spatial information. We convert it into a spatial object by pointing to its longitude and latitude columns and assigning the WGS 84 coordinate reference system (CRS).
+
+```{r}
+#| label: convert-future-dams
+
+# Convert the CSV to a spatial (sf) object using its coordinate columns
+future_dams_sf <- future_dams %>%
+  st_as_sf(coords = c("lon_cleaned", "lat_cleaned"), crs = 4326)
+
+```
+
+### Verify coordinate reference systems (CRS)
+
+Before combining or overlaying spatial datasets, we need to make sure they all use the same coordinate system. We check the CRS of each dataset below.
+
+```{r}
+#| label: check-crs
+#| output: false
+
+# Check CRS for each layer
+st_crs(protected_areas_polygon)
+st_crs(current_dams)
+st_crs(future_dams_sf)
+st_crs(basin_level3)
+
+```
+
+All four datasets use **WGS 84 (EPSG:4326)**, so no coordinate transformation is needed.
+
+## Filter to Nepal basin
+
+We use the HydroBASINS level 3 dataset to isolate Nepal's watershed. This basin-based approach is more appropriate than using political boundaries because our analysis focuses on river connectivity and watershed level impacts.
+
+```{r}
+#| label: filter-nepal-basin
+
+# Filter to Nepal basin
+nepal_basin <- basin_level3 %>% 
+  filter(hybas_id == 4030025450)
+
+```
+
+## Crop datasets to Nepal
+
+Each global dataset needs to be clipped to the Nepal basin boundary. Here, we use two approach for efficiency. **First**, we crop to the bounding box, a quick rectangular filter. **Second**, we perform a precise intersection with the basin polygon.
+
+We temporarily turn off spherical geometry (S2) because these datasets contain minor geometry errors that cause S2 to fail. For a small area, planar geometry is accurate enough and avoids these issues.
+
+*S2 is a system for working with geographic data on a sphere. It is is used by the sf package in R by default. S2 is more accurate, but it's also stricter — it will reject geometries with even tiny errors like a line crossing itself or a duplicated point. That's why we turned it off temporarily when working with the WDPA and GRanD datasets, which had minor geometry imperfections. For a small region like Nepal, the difference in accuracy between spherical and flat calculations is negligible.*
+
+### Crop protected areas
+
+```{r}
+#| label: crop-protected-areas
+
+# Turn off spherical geometry to avoid errors from minor geometry issues
+sf_use_s2(FALSE)
+
+# Crop to bounding box first, fix any invalid geometries, then intersect precisely
+nepal_protected <- protected_areas_polygon %>%
+  st_crop(st_bbox(nepal_basin)) %>%
+  st_make_valid() %>%
+  st_intersection(nepal_basin)
+
+# Turn spherical geometry back on
+sf_use_s2(TRUE)
+```
+
+### Crop current dams
+
+```{r}
+#| label: crop-current-dams
+
+# Turn off spherical geometry to avoid errors from minor geometry issues
+sf_use_s2(FALSE)
+
+# Crop to bounding box first, fix any invalid geometries, then intersect precisely
+nepal_dams <- current_dams %>%
+  st_crop(st_bbox(nepal_basin)) %>%
+  st_make_valid() %>%
+  st_intersection(nepal_basin)
+
+# Turn spherical geometry back on
+sf_use_s2(TRUE)
+
+```
+
+### Crop future dams
+
+```{r}
+#| label: crop-future-dams
+
+# Turn off spherical geometry to avoid errors from minor geometry issues
+sf_use_s2(FALSE)
+
+# Crop to bounding box first, fix any invalid geometries, then intersect precisely
+nepal_future_dams <- future_dams_sf %>%
+  st_crop(st_bbox(nepal_basin)) %>%
+  st_make_valid() %>%
+  st_intersection(nepal_basin)
+
+# Turn spherical geometry back on
+sf_use_s2(TRUE)
+
+```
+
+## Clean text encoding
+
+Some datasets contain special characters that are not valid UTF-8, which can cause errors when rendering interactive maps. We clean all text columns by converting them to UTF-8 and removing any invalid characters.
+
+*UTF-8 is a standard way computers store and display text. It covers English letters, numbers and characters from other languages like Nepali, Chinese, or Spanish. Some of our datasets (especially WDPA and FHReD) contain place names or descriptions with special characters that don't follow this standard. These characters look fine in a table, but when tmap tries to build an interactive Leaflet map, it converts everything to a web-friendly format that requires valid UTF-8. The `iconv()` function goes through every text column, converts characters to proper UTF-8, removes any that can't be converted. This way, we might lose the occasional unusual character, but the maps render without errors.
+
+```{r}
+#| label: fix-encoding
+
+# Convert all character columns to valid UTF-8 encoding
+nepal_protected <- nepal_protected %>%
+  # `sub` substitutes invalid characters with nothing
+  mutate(across(where(is.character), ~iconv(., to = "UTF-8", sub = "")))
+
+nepal_future_dams <- nepal_future_dams %>%
+  mutate(across(where(is.character), ~iconv(., to = "UTF-8", sub = "")))
+```
+
+## Set map mode
+
+We switch `tmap` to interactive mode, which creates zoomable, clickable maps powered by Leaflet. This makes it easy to explore the data and click on individual features to see their attributes.
+
+```{r}
+#| label: set-tmap-mode
+
+# Use interactive (Leaflet-based) maps
+tmap_mode("view")
+```
+
+## Map 1: Current dams and protected areas
+
+This map shows existing dams (blue dots) overlaid on protected areas (green polygons) within the Nepal basin. It helps us see how many current dams are located near or within ecologically protected zones.
+
+```{r}
+#| label: map-current-dams
+
+tm_shape(nepal_basin) +
+  tm_polygons(fill = "grey90", col = "grey60") +
+tm_shape(nepal_protected) +
+  tm_polygons(fill = "darkgreen", fill_alpha = 0.2, col = "darkgreen") +
+tm_shape(nepal_dams) +
+  tm_dots(fill = "deepskyblue3", size = 0.25) +
+tm_title("Current Dams and Protected Areas in Nepal Basin")
+```
+
+## Map 2: Future dams and protected areas
+
+This map shows planned future dams (violet red dots) against protected areas. It highlights where proposed hydropower development could conflict with conservation goals.
+
+```{r}
+#| label: map-future-dams
+
+tm_shape(nepal_basin) +
+  tm_polygons(fill = "grey90", col = "grey60") +
+tm_shape(nepal_protected) +
+  tm_polygons(fill = "darkgreen", fill_alpha = 0.2, col = "darkgreen") +
+tm_shape(nepal_future_dams) +
+  tm_dots(fill = "violetred4", size = 0.25) +
+tm_title("Future Dams and Protected Areas in Nepal Basin")
+```
+
+## Map 3: Current and future dams together with protected area
+
+This combined map shows both existing dams (blue dots) and planned future dams (violet red dots) alongside protected areas. Current dams are plotted last so they remain visible on top of the future dam layer. This view helps us compare where dams already exist versus where new ones are planned, and how both relate to protected areas.
+
+```{r}
+tm_shape(nepal_basin) +
+  tm_polygons(fill = "grey90", col = "grey60") +
+tm_shape(nepal_protected) +
+  tm_polygons(fill = "darkgreen", fill_alpha = 0.2, col = "darkgreen") +
+tm_shape(nepal_future_dams) +
+  tm_dots(fill = "violetred4", size = 0.25) +
+tm_shape(nepal_dams) +
+  tm_dots(fill = "deepskyblue", size = 0.25) +
+tm_title("Current & Future Dams with Protected Areas in Nepal Basin")
+```
+
+

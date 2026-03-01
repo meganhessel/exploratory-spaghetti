@@ -1,76 +1,96 @@
 ---
-title: "exporatory-Leela"
-format: html
+title: "Exploratory document"
+author: "Aakriti Poudel"
+date: "January 2026"
+format:
+  pdf:
+    code-fold: false
+    toc: true
+  html: 
+    code-fold: false
+    toc: true
+execute:
+  warning: false
+  message: false
+editor: source
+editor_options: 
+  chunk_output_type: inline
 ---
 
+# NetZeroHydro
+
+## Load all necessary packages
 ```{r}
+# Load all necessary libraries
+library(terra)
+library(sf)
+library(spData)
+library(tidyverse)
+library(here)
+library(janitor)
+```
+
+```{r}
+library(sf)
 library(tidyverse)
 library(janitor)
-library(dplyr)
-library(tmap)
-library(sf)
-library(here)
+
+# Read current dams data
+current_dams <- read_sf("../../../../../capstone/netzerohydro/data/raw/GRanD_Version_1_3") %>% 
+  clean_names()
+
+# Read future dams data
+future_dams <- read_csv("../../../../../capstone/netzerohydro/data/raw/FHReD_2015_future_dams/FHReD_2015_future_dams_Zarfl_et_al_beta_version.csv") %>%
+  clean_names()
+
+# Read water basin level 3 data
+basin_level3 <- read_sf("../../../../../capstone/netzerohydro/data/raw/hybas_as_lev01-12_v1c/hybas_as_lev03_v1c.shp") %>% 
+  clean_names()
+
+# Read rivers of Asia
+asia_rivers <- read_sf("../../../../../capstone/netzerohydro/data/raw/HydroRIVERS_v10_as.gdb") %>% 
+  clean_names()
+
+```
+
+
+
+```{r}
 library(stars)
-library(spData)
 library(terra)
-library(riverconn)
-library(igraph)
-library(tidygraph)
-library(sfnetworks)
-library(lwgeom)
-```
 
-Load dataframes 
-```{r}
-# Dams
-current_dams <- read_sf("../../../../capstone/netzerohydro/data/raw/GRanD_Version_1_3") %>% 
-  clean_names()
+# Read world population dataset as raster
 
-future_dams <- read_csv('../../../../capstone/netzerohydro/data/FHReD_2015_future_dams/FHReD_2015_future_dams_Zarfl_et_al_beta_version.csv') %>% 
-  clean_names()
+# Read as raster
+global_pop <- rast("../../../../../capstone/netzerohydro/data/raw/global_pop_2020_CN_1km_R2025A_UA_v1.tif")
 
-# Population
-global_pop_sf <- read_stars('../../../../capstone/netzerohydro/data/global_pop_2020_CN_1km_R2025A_UA_v1.tif') %>% 
-  clean_names()
-
-global_pop_rast <- rast('../../../../capstone/netzerohydro/data/global_pop_2020_CN_1km_R2025A_UA_v1.tif') %>% 
-  clean_names()
-
-# Water Basin
-basin_level3 <- read_sf('../../../../capstone/netzerohydro/data/hybas_as_lev03_v1c/hybas_as_lev03_v1c.shp') %>% 
-  clean_names()
-
-# Rivers
-asia_rivers <- read_sf('../../../../capstone/netzerohydro/data/HydroRIVERS_v10_as.gdb') %>% 
-  clean_names()
-
-# nepal rivers order 3up
-nepal_rivers_3up <- readRDS("../../../../../capstone/netzerohydro/data/cleaned_v1/nepal_rivers_3up.rds")
+# Convert to sf points (if needed for spatial operations)
+global_pop_sf <- as.points(global_pop, values = TRUE, na.rm = TRUE) %>% 
+  st_as_sf()
 
 ```
 
-Making `future_dams` spatial  
+
 ```{r}
+# Making future dams spatial  
 future_dams <- st_as_sf(future_dams,
          coords = c('lon_cleaned', 'lat_cleaned'), 
          crs = st_crs(current_dams))
-```
 
-Nepal Basin 
-```{r}
+# Filter to Nepal
 nepal_basin <- basin_level3 %>% 
   filter(hybas_id == 4030025450)
-```
 
-Filtering Rivers to order 2 or 3 
-```{r}
+# Filter river orders (2, 3)
 asia_rivers2 <- asia_rivers %>%
   filter(ord_clas == 2)
 
 asia_rivers3 <- asia_rivers %>% 
   filter(ord_clas >= 3)
 
-# Look at difference between river order 2 vs 3 
+library(tmap)
+
+# This is the difference between river order 2 vs 3 
 tm_shape(asia_rivers2) +
   tm_lines()
 
@@ -78,29 +98,120 @@ tm_shape(asia_rivers3) +
   tm_lines()
 ```
 
-
-Making geometeries valid 
 ```{r}
+# Make geometries valid
 current_dams <- st_make_valid(current_dams)
 future_dams <- st_make_valid(future_dams)
 nepal_basin <- st_make_valid(nepal_basin)
 asia_rivers2 <- st_make_valid(asia_rivers2)
 asia_rivers3 <- st_make_valid(asia_rivers3)
+
+# Ensure all objects have the same CRS (use nepal_basin CRS as reference)
+target_crs <- st_crs(nepal_basin)
+
+# Transform all to match nepal_basin CRS
+current_dams <- st_transform(current_dams, crs = target_crs)
+future_dams <- st_transform(future_dams, crs = target_crs)
+asia_rivers <- st_transform(asia_rivers, crs = target_crs)
+asia_rivers2 <- st_transform(asia_rivers2, crs = target_crs)
+asia_rivers3 <- st_transform(asia_rivers3, crs = target_crs)
 ```
 
-Crop dams and rivers to Nepal basin 
+
 ```{r}
+# Ensure CRS match before cropping
+current_dams <- st_transform(current_dams, crs = st_crs(nepal_basin))
+future_dams <- st_transform(future_dams, crs = st_crs(nepal_basin))
+asia_rivers3 <- st_transform(asia_rivers3, crs = st_crs(nepal_basin))
+
+# Crop dams to Nepal basin
 nepal_current_dams <- st_intersection(nepal_basin, current_dams)
 nepal_future_dams <- st_intersection(nepal_basin, future_dams)
-# nepal_rivers3 <- st_intersects(nepal_basin, asia_rivers3)
-# nepal_rivers2 <- st_intersects(nepal_basin, asia_rivers2)
 
-nepal_rivers <- asia_rivers3 %>% 
+# Ensure CRS is preserved after intersection
+if (is.na(st_crs(nepal_current_dams))) {
+  nepal_current_dams <- st_set_crs(nepal_current_dams, st_crs(nepal_basin))
+}
+if (is.na(st_crs(nepal_future_dams))) {
+  nepal_future_dams <- st_set_crs(nepal_future_dams, st_crs(nepal_basin))
+}
+
+# Crop rivers to Nepal basin - using st_filter to keep all river segments that intersect
+nepal_rivers <- asia_rivers3 %>%
   st_filter(y = nepal_basin, .predicate = st_intersects)
 ```
 
-Map! 
 ```{r}
+# Check CRS
+asia_rivers <- st_transform(asia_rivers, crs = st_crs(nepal_basin))
+nepal_rivers_all <- asia_rivers %>%
+  st_filter(y = nepal_basin, .predicate = st_intersects)
+
+# Filter for river orders
+nepal_rivers3 <- nepal_rivers_all %>% 
+  filter(ord_stra == 3)
+
+nepal_rivers4 <- nepal_rivers_all %>% 
+  filter(ord_stra == 4)
+
+nepal_rivers5 <- nepal_rivers_all %>% 
+  filter(ord_stra == 5)
+
+nepal_rivers6 <- nepal_rivers_all %>% 
+  filter(ord_stra == 6)
+
+nepal_rivers7 <- nepal_rivers_all %>% 
+  filter(ord_stra == 7)
+
+nepal_rivers8 <- nepal_rivers_all %>% 
+  filter(ord_stra == 8)
+
+nepal_rivers9 <- nepal_rivers_all %>% 
+  filter(ord_stra == 9)
+
+# Combine all orders 3-9 into single dataset
+nepal_rivers_3up <- rbind(
+  nepal_rivers3,
+  nepal_rivers4,
+  nepal_rivers5,
+  nepal_rivers6,
+  nepal_rivers7,
+  nepal_rivers8,
+  nepal_rivers9
+)
+
+# Make geometries valid
+nepal_rivers_3up <- st_make_valid(nepal_rivers_3up)
+
+# Ensure CRS is preserved after rbind and st_make_valid
+if (is.na(st_crs(nepal_rivers_3up))) {
+  nepal_rivers_3up <- st_set_crs(nepal_rivers_3up, st_crs(nepal_basin))
+}
+```
+
+
+
+```{r}
+# This function removes invalid UTF-8 from character columns
+clean_utf8 <- function(x) {
+  if (inherits(x, "sf")) {
+    # Clean all character columns
+    char_cols <- sapply(x, is.character)
+    for (col in names(x)[char_cols]) {
+      if (col != attr(x, "sf_column")) {  # Skip geometry column
+        x[[col]] <- iconv(x[[col]], from = "UTF-8", to = "UTF-8", sub = "")
+      }
+    }
+  }
+  return(x)
+}
+
+# Clean the data before mapping
+nepal_basin <- clean_utf8(nepal_basin)
+nepal_current_dams <- clean_utf8(nepal_current_dams)
+nepal_future_dams <- clean_utf8(nepal_future_dams)
+nepal_rivers_3up <- clean_utf8(nepal_rivers_3up)
+
 tm_shape(nepal_basin) + 
   tm_polygons(fill_alpha = 0.4, lwd = 2.5) + 
   tm_basemap('Esri.WorldTopoMap') + 
@@ -108,8 +219,8 @@ tm_shape(nepal_basin) +
   tm_dots(fill = "red") + 
   tm_shape(nepal_future_dams) + 
   tm_dots(fill = "blue") + 
-  #tm_shape(nepal_rivers2) + 
-  #tm_lines() + 
+  tm_shape(nepal_rivers_3up) + 
+  tm_lines() + 
   tm_add_legend(type = "polygons", 
                 labels = c("Current Dams", "Future Dams"), 
                 fill = c("red", "blue"), 
@@ -117,10 +228,8 @@ tm_shape(nepal_basin) +
   tm_title(text = "Dams in Nepal") + 
   tm_compass() + 
   tm_scalebar()
-
 ```
 
-Plot rivers for crop of Nepal
 ```{r}
 tm_shape(nepal_rivers) +
   tm_lines() +
@@ -133,10 +242,10 @@ crs(nepal_rivers)
 crs(current_dams)
 ```
 
-Problem: Tried to make rivers into points, but too much overlap to identify confluences I think. don't know how to define points on the rivers, then don't know how to map a line along the river between 2 points.
-
-trying with tidygraph
 ```{r}
+library(tidygraph)
+library(igraph)
+
 nepal_edges <- nepal_rivers %>%
   mutate(edgeID = c(1:n()))
 
@@ -292,68 +401,5 @@ colnames(nepal_rivers_net)
 
 nepal_dam_string <- st_split(nepal_rivers_net$geometry, currentdams_nodes$geometry) %>% 
   st_collection_extract("LINESTRING")
-```
-
-```{r}
-currentdams_nodes <- as_sfnetwork(nepal_current_dams, directed = FALSE)
-
-nepal_river_dams <- st_network_join(nepal_rivers_net, currentdams_nodes)
-
-plot(nepal_river_dams)
-```
-
-
---------------------------
-Read in population data
-```{r}
-pop <- rast('../../../../capstone/netzerohydro/data/raw/global_pop_2020_CN_1km_R2025A_UA_v1.tif')
-
-nepal_rivers_vect <- vect(nepal_rivers)
-crs(pop) # no crs, we will assign 4326
-pop <- project(pop, "epsg:4326")
-crs(pop) # looks good
-
-res(pop) == res(nepal_rivers_vect)
-
-pop_nepal <- crop(pop, nepal_rivers_vect)
-
-net_with_dams_vect <- vect(net_with_dams_df)
-
-# remove 0s, I don't think there were any
-pop_nepal_nozero <- subst(pop_nepal, 0, NA)
-# filter for populations less than 100
-pop_nepal_nozero[pop_nepal_nozero < 100 ] <- NA
-```
-
-```{r}
-# plot populations and nepal rivers
-plot(pop_nepal_nozero) 
-#plot(net_with_dams_df, add = TRUE, col = "orange")
-plot(nepal_rivers_vect, add = TRUE, col = "orange", alpha = 0.3)
-```
-```{r}
-# make future dams a terra object
-nepal_future_dams <- readRDS("../../../../../capstone/netzerohydro/data/cleaned_v1/nepal_future_dams.rds") 
-nepal_future_dams_vect <- vect(nepal_future_dams)
-```
-
-```{r}
-# plot future dams
-plot(pop_nepal)
-plot(nepal_future_dams_vect, add = TRUE, col = "orange", alpha = 0.5)
-```
-
-```{r}
-crs(nepal_future_dams_vect)
-# create buffer around future dams
-nepal_future_buffer <- buffer(nepal_future_dams_vect, width = 1000)
-plot(nepal_future_buffer)
-```
-
-```{r}
-# find pop values within the buffer
-pop_nepal_values <- extract(pop_nepal, nepal_future_buffer, fun = sum, na.rm = TRUE) %>% 
-  rename(total_pop = global_pop_2020_CN_1km_R2025A_UA_v1,
-         future_dam = ID)
 ```
 

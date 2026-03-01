@@ -3,3 +3,169 @@ title: "river_connection_directional"
 format: html
 ---
 
+Load Libraries
+
+```{r}
+#| output: false 
+library(sfnetworks)
+library(sf)
+library(tidygraph)
+library(dplyr)
+library(purrr)
+library(TSP)
+```
+
+Load Data 
+```{r}
+trial_river <- readRDS("../../../../../capstone/netzerohydro/data/cleaned_v1/trial_river.rds")
+
+
+```
+
+```{r}
+# Change MULTISTRINGS TO LINESTRING (for sfnetwork)
+trial_river <- st_cast(trial_river , "LINESTRING")
+
+```
+
+
+
+## Transform data to `sfnetwork` type and calculates edge weights
+
+-   Spatial networks have 2 data tables:
+
+    -   Nodes (junctions/endpoints)
+    -   Edges (line connecting points)
+
+-   Create another column: `weight` for river segment *distance*
+
+-   `direction = TRUE` means flow can only do in the direction the line geometeries are drawn (downstream only). Should align with flow direction in HydroRIVERS
+
+    -   df's `next_down` column - each segment points to its downstream neighbor
+    -   **For downstream-only paths: This now enforces that paths only follow the direction of line geometries (downstream). A path from upstream→downstream will work, but downstream→upstream won't find a route.**
+
+```{r}
+net <- as_sfnetwork(trial_river, direction = TRUE) %>% # convert river geom into spatial network 
+  tidygraph::activate("edges") %>%  # "Next operation applied to edges table (not node table)"
+  mutate(weight = edge_length()) # calculate spatial length of each edge (river segment)
+         
+
+net_df <- as_tibble(net) # makes sfnetwork a df 
+```
+
+**Direction:** When you call `net`, it says 'A rooted tree' which means its directed (a tree structure has a root and flows one way).
+
+```{r}
+net
+```
+
+## Define path
+
+-   Shortest path from node \# (3) to \# (15) using `weight` column
+
+    -   Would count edges \[fewest segments\] instead of distance if not `weight`
+    -   \# = Node IDs (row number in nodes table)
+
+-   Returns: list of nodes that are the shortest path/route (EX: `[3, 7, 12, 15]` = path goes thru nodes 3→7→12→15)
+
+-   **Direction** (checking if it worked)
+
+    -   `paths_down` returns a valid path
+
+    -   `paths_up` is invalid and returns a warning!
+
+```{r}
+# Define path: find shortest path from node 3 and 15 using weight column
+paths_down = st_network_paths(net, from = 3, to = 15, weight = "weight") 
+
+```
+
+```{r}
+# Define path: find shortest path from node 15 and 3 (UPSTREAM)
+paths_up = st_network_paths(net, from = 15, to = 3, weight = "weight") 
+```
+
+## List nodes and edges
+
+```{r}
+# lists nodes
+paths_down %>%
+  slice(1) %>% # first row (first path found)
+  pull(node_paths) %>% # extract Node_path (juctions/points you pass thru)
+  unlist() # List -> vector 
+# lists edges
+paths_down %>%
+  slice(1) %>%
+  pull(edge_paths) %>% # extract edge_path (river segments)
+  unlist()
+
+```
+
+
+## Plot
+
+3 levels to the plotting:
+
+1.  Base layer: plot entire path `plot(net)`
+
+2.  Path: (*use function*)
+
+3.  Start and end node points
+
+```{r}
+plot_path = function(node_path) { # input = vector of node IDs as table 
+  net %>% 
+    activate("nodes") %>% # Node table 
+    slice(node_path) %>% # Select nodes in the path 
+    plot(cex = 1.5, lwd = 1.5, add = TRUE) # plot thise nodes on top od existing plot 
+}
+
+
+colors = sf.colors(3, categorical = TRUE) # 3 distcict colors for viz 
+
+
+# Plotting entire network in grey (base layer)
+plot(net, col = "grey")
+
+# Plot nodes
+paths_down %>%
+  pull(node_paths) %>% # extract Node_path (juctions/points you pass thru) of `paths`
+  purrr::walk(plot_path) # applies `plot_path` function for each path 
+
+# Plot start and end nodes 
+net %>%
+  activate("nodes") %>% 
+  st_as_sf() %>% # convert nodes to sf object for plotting
+  slice(c(3, 15)) %>% # Get only nodes 3 and 15 (start and end)
+  plot(col = colors, pch = 8, cex = 2, lwd = 2, add = TRUE) # Plot as stars, in color, on top
+```
+
+## Plotting Direction of River
+
+Show flow direction: Each arrow points from line start → midpoint
+
+```{r}
+# # Plot base river
+# plot(st_geometry(trial_river), col = "grey") # Draws rivee network in grey 
+# 
+# # Add arrows showing flow direction
+# midpoints <- trial_river %>%
+#   st_line_sample(sample = 0.5) %>%   # Extract midway point at each line 
+#   st_cast("POINT") %>% # point geometery 
+#   st_coordinates() %>% # Convert to x,y coorfinate matrix 
+#   as.data.frame() 
+# 
+# # Get start points for arrow direction
+# startpoints <- trial_river %>%
+#   st_cast("POINT") %>% # covert line -> points 
+#   filter(row_number() %% 2 == 1) %>%  # first point of each line (`%% 2 == 1` filters for odd numbered rows, grabbing 1st vertex of each line)
+#   st_coordinates() %>% # x,y coordinates 
+#   as.data.frame() 
+# 
+# # Draw arrows
+# arrows(startpoints$X, startpoints$Y, # From x and y
+#        midpoints$X, midpoints$Y,  # to x and y
+#        length = 0.1, col = "blue")
+
+```
+

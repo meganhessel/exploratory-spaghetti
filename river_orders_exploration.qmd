@@ -5,6 +5,8 @@ format: html
 
 ```{r}
 library(tmap)
+library(janitor)
+library(sf)
 ```
 
 
@@ -15,7 +17,7 @@ nepal_future_dams <- readRDS("../../../../../capstone/netzerohydro/data/cleaned_
 nepal_current_dams <- readRDS("../../../../../capstone/netzerohydro/data/cleaned_v1/nepal_future_dams.rds")
 
 # All asia Rivers
-asia_rivers <- read_sf("../../../../../capstone/netzerohydro/data/HydroRIVERS_v10_as.gdb") %>% 
+asia_rivers <- read_sf("../../../../../capstone/netzerohydro/data/raw/HydroRIVERS_v10_as.gdb") %>% 
   clean_names()
 
 ```
